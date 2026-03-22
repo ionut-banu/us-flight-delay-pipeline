@@ -1,0 +1,100 @@
+id: ingest_lookups
+namespace: flights
+
+variables:
+  airports_file: "airports.csv"
+  airlines_file: "airlines.csv"
+
+  airports_gcs_file: "gs://{{ kv('GCP_BUCKET_NAME') }}/raw/lookups/{{ vars.airports_file }}"
+  airlines_gcs_file: "gs://{{ kv('GCP_BUCKET_NAME') }}/raw/lookups/{{ vars.airlines_file }}"
+
+tasks:
+  - id: set_labels
+    type: io.kestra.plugin.core.execution.Labels
+    labels:
+      flow: "lookup_ingestion"
+      airports_file: "{{ render(vars.airports_file) }}"
+      airlines_file: "{{ render(vars.airlines_file) }}"
+
+  - id: extract_airports
+    type: io.kestra.plugin.scripts.shell.Commands
+    outputFiles:
+      - "airports.csv"
+    taskRunner:
+      type: io.kestra.plugin.core.runner.Process
+    commands:
+      - >
+        curl -L --fail
+        'https://transtats.bts.gov/Download_Lookup.asp?Y11x72=Y_NVecbeg_fRd_VQ'
+        -o {{ render(vars.airports_file) }}
+
+  - id: upload_airports_gcs
+    type: io.kestra.plugin.gcp.gcs.Upload
+    from: "{{ outputs.extract_airports.outputFiles['airports.csv'] }}"
+    to: "{{ render(vars.airports_gcs_file) }}"
+
+  - id: load_airports_bq
+    type: io.kestra.plugin.gcp.bigquery.LoadFromGcs
+    destinationTable: "{{ kv('GCP_PROJECT_ID') }}.flights_raw.raw_airports"
+    from:
+      - "{{ render(vars.airports_gcs_file) }}"
+    format: CSV
+    schema:
+      fields:
+        - name: Code
+          type: STRING
+        - name: Description
+          type: STRING
+    csvOptions:
+      skipLeadingRows: 1
+      fieldDelimiter: ","
+      encoding: UTF-8
+      allowQuotedNewLines: true
+    writeDisposition: WRITE_TRUNCATE
+    ignoreUnknownValues: true
+
+  - id: extract_airlines
+    type: io.kestra.plugin.scripts.shell.Commands
+    outputFiles:
+      - "airlines.csv"
+    taskRunner:
+      type: io.kestra.plugin.core.runner.Process
+    commands:
+      - >
+        curl -L --fail
+        'https://transtats.bts.gov/Download_Lookup.asp?Y11x72=Y_haVdhR_PNeeVRef'
+        -o {{ render(vars.airlines_file) }}
+
+  - id: upload_airlines_gcs
+    type: io.kestra.plugin.gcp.gcs.Upload
+    from: "{{ outputs.extract_airlines.outputFiles['airlines.csv'] }}"
+    to: "{{ render(vars.airlines_gcs_file) }}"
+
+  - id: load_airlines_bq
+    type: io.kestra.plugin.gcp.bigquery.LoadFromGcs
+    destinationTable: "{{ kv('GCP_PROJECT_ID') }}.flights_raw.raw_carriers"
+    from:
+      - "{{ render(vars.airlines_gcs_file) }}"
+    format: CSV
+    schema:
+      fields:
+        - name: Code
+          type: STRING
+        - name: Description
+          type: STRING
+    csvOptions:
+      skipLeadingRows: 1
+      fieldDelimiter: ","
+      encoding: UTF-8
+      allowQuotedNewLines: true
+    writeDisposition: WRITE_TRUNCATE
+    ignoreUnknownValues: true
+
+  - id: purge_files
+    type: io.kestra.plugin.core.storage.PurgeCurrentExecutionFiles
+
+pluginDefaults:
+  - type: io.kestra.plugin.gcp
+    values:
+      projectId: "{{ kv('GCP_PROJECT_ID') }}"
+      location: "{{ kv('GCP_LOCATION') }}"

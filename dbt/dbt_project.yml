@@ -1,0 +1,19 @@
+name: 'flights'
+version: '1.0.0'
+config-version: 2
+
+profile: 'flights'
+
+model-paths: ["models"]
+test-paths: ["tests"]
+log-path: "logs"
+target-path: "target"
+
+models:
+  flights:
+    staging:
+      +materialized: view
+    intermediate:
+      +materialized: view
+    mart:
+      +materialized: table
