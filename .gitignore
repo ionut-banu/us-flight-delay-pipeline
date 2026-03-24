@@ -267,3 +267,4 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+.bruin.yml

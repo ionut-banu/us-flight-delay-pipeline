@@ -1,0 +1,42 @@
+version: 2
+
+models:
+  - name: stg_airports
+    description: Clean airport lookup table with parsed city, state, and airport name fields.
+    columns:
+      - name: airport_code
+        description: Standardized airport code.
+        tests:
+          - not_null
+          - unique
+
+      - name: airport_description
+        description: Raw airport description after trimming.
+        tests:
+          - not_null
+
+      - name: city_state
+        description: Portion before the colon, usually 'City, ST'.
+
+      - name: airport_name
+        description: Portion after the colon, usually the airport name.
+
+      - name: city_name
+        description: Parsed city name.
+
+      - name: state_code
+        description: Parsed state code when present.
+
+  - name: stg_carriers
+    description: Clean carrier lookup table.
+    columns:
+      - name: carrier_code
+        description: Standardized carrier code.
+        tests:
+          - not_null
+          - unique
+
+      - name: carrier_name
+        description: Carrier name or description.
+        tests:
+          - not_null

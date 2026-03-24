@@ -2,17 +2,28 @@
 
 ## ✈️ US Flight Delay Analytics Pipeline
 
-End-to-end batch data pipeline built with Terraform, Kestra, dbt, and BigQuery on GCP. Analyzes 21M+ US flights (2022–2024) on-time performance to surface airline delay trends and cancellation patterns using BTS data. Built as the capstone project for the
-[DataTalks.Club Data Engineering Zoomcamp](https://github.com/DataTalksClub/data-engineering-zoomcamp).
+End-to-end batch ELT pipeline built with Terraform, Kestra, dbt, and BigQuery on GCP.
 
-### Problem Statement
+This project ingests BTS US on-time performance data for 2022–2024, loads it into BigQuery, transforms it with dbt, and produces analytics-ready models for airline delay trends, cancellation patterns, and route performance.
 
-US flight delays cost airlines and passengers billions of dollars annually.
-This pipeline ingests 3 years of BTS on-time performance data (~21M flights),
-transforms it in BigQuery, and surfaces two key questions via a dashboard:
+Built as the capstone project for the [DataTalks.Club Data Engineering Zoomcamp](https://github.com/DataTalksClub/data-engineering-zoomcamp).
+
+## Questions answered
 
 - Which airlines have the worst on-time performance, and why?
 - Is flight delay getting better or worse over time?
+- Which routes, airports, and carriers contribute most to delays and cancellations?
+
+## Stack
+
+- **Cloud**: GCP (BigQuery, GCS, IAM)
+- **Infrastructure**: Terraform
+- **Orchestration**: Kestra
+- **Transformations**: dbt Core + dbt-bigquery
+- **Language**: SQL, YAML, Python
+- **Source data**: BTS On-Time Performance data
+
+## Project structure
 
 ```text
 us-flight-delay-pipeline/
@@ -24,7 +35,7 @@ us-flight-delay-pipeline/
 ├── docker-compose.yml
 │
 ├── keys/                          ← GITIGNORED — never committed
-│   └── gcp-creds.json             ← your GCP service account key
+│   └── gcp-creds.json             ← local GCP service account key
 │
 ├── terraform/
 │   ├── main.tf
@@ -39,7 +50,7 @@ us-flight-delay-pipeline/
 └── dbt/
     ├── dbt_project.yml
     ├── profiles.yml               ← GITIGNORED — never committed
-    ├── profiles.yml.example       ← committed — template only
+    ├── profiles.yml.example       ← committed template
     ├── packages.yml
     ├── schema.yml
     └── models/
@@ -55,23 +66,30 @@ us-flight-delay-pipeline/
             └── mart_route_performance.sql
 ```
 
-Phase 1 — GCP Service Account Setup
-This is the only fully manual phase. Every command goes in your terminal.
+## Prerequisites
 
-Step 1: Create the GCP Project
+Install these locally before starting:
+
+- Google Cloud SDK (`gcloud`)
+- Terraform
+- Docker and Docker Compose
+- Python 3.11+
+- A GCP project
+
+---
+
+## Phase 1 — GCP project and service account
+
+### 1. Create the GCP project
 
 ```bash
-# Set your project name once — reuse this variable throughout
 export PROJECT_ID="your-project-id"   # must be globally unique
 
 gcloud projects create $PROJECT_ID
 gcloud config set project $PROJECT_ID
-
-# Link billing (required for BigQuery + GCS)
-# Do this manually in: console.cloud.google.com/billing
 ```
 
-Step 2: Enable Required APIs
+### 2. Enable required APIs
 
 ```bash
 gcloud services enable \
@@ -80,60 +98,60 @@ gcloud services enable \
   iam.googleapis.com
 ```
 
-Step 3: Create the Service Account + Download Key
+### 3. Create the service account and download the key
 
 ```bash
-# Create the service account
 gcloud iam service-accounts create us-flight-delay-pipeline-sa \
   --display-name="US Flight Delay Pipeline Service Account"
 
-# Grant BigQuery Admin
 gcloud projects add-iam-policy-binding $PROJECT_ID \
   --member="serviceAccount:us-flight-delay-pipeline-sa@$PROJECT_ID.iam.gserviceaccount.com" \
   --role="roles/bigquery.admin"
 
-# Grant Storage Admin
 gcloud projects add-iam-policy-binding $PROJECT_ID \
   --member="serviceAccount:us-flight-delay-pipeline-sa@$PROJECT_ID.iam.gserviceaccount.com" \
   --role="roles/storage.admin"
 
-# Download the JSON key into your keys/ folder
 mkdir -p keys
+
 gcloud iam service-accounts keys create ./keys/gcp-creds.json \
   --iam-account=us-flight-delay-pipeline-sa@$PROJECT_ID.iam.gserviceaccount.com
 ```
 
-Step 4: Set the .env File
+### 4. Create the local environment file
 
 ```bash
-# .env.example (committed to GitHub — template only)
+cp .env.example .env
+```
+
+Example `.env.example`:
+
+```bash
 GCP_PROJECT_ID=your-project-id
 GCP_REGION=us-central1
 GCP_BUCKET_NAME=your-project-id-flights-lake
-GCP_CREDENTIALS_PATH=../keys/gcp-creds.json
+GCP_CREDENTIALS_PATH=./keys/gcp-creds.json
 ```
 
-```bash
-# Actual usage: copy and fill in
-cp .env.example .env
-# Edit .env with your real values
-```
+## Credentials flow
 
-How the Key Gets Used
-
-The gcp-creds.json file flows into three places — each consumes it differently:
+The same service account key is used by multiple parts of the project:
 
 ```text
 keys/gcp-creds.json
     │
     ├── Terraform ──────► provider "google" { credentials = file("../keys/gcp-creds.json") }
     │
-    ├── dbt ─────────────► profiles.yml: keyfile: ../keys/gcp-creds.json
+    ├── dbt ────────────► profiles.yml: keyfile: ../keys/gcp-creds.json
     │
-    └── Kestra ──────────► stored as a secret → injected into flows as {{ secret('GCP_CREDS') }}
+    └── Kestra ─────────► stored as a Secret and injected into flows
 ```
 
-Phase 2 — Terraform
+---
+
+## Phase 2 — Terraform
+
+Provision the GCS bucket and BigQuery datasets.
 
 ```bash
 cd terraform
@@ -149,15 +167,15 @@ terraform apply \
   -var="bucket_name=$PROJECT_ID-flights-lake"
 ```
 
-After apply you will see:
+Expected outputs:
 
 ```text
-Outputs:
 bucket_name = "your-project-id-flights-lake"
 raw_dataset = "flights_raw"
 dbt_dataset = "flights_dbt"
-To tear everything down when you're done (avoids GCP costs):
 ```
+
+To tear everything down later:
 
 ```bash
 terraform destroy \
@@ -165,19 +183,181 @@ terraform destroy \
   -var="bucket_name=$PROJECT_ID-flights-lake"
 ```
 
-Phase 3 — Kestra (Docker Compose)
+---
+
+## Phase 3 — Kestra
+
+Start Kestra locally:
 
 ```bash
-docker-compose up -d
-# Kestra UI → http://localhost:8080
+docker compose up -d
 ```
 
-Storing the GCP Key in Kestra
+Open the UI at:
 
-In the Kestra UI, go to Namespaces → flights → KV Store, and add:
+```text
+http://localhost:8080
+```
 
-| Key             | Value                                                         |
-| --------------- | ------------------------------------------------------------- |
-| GCP_PROJECT_ID  | your-project-id                                               |
-| GCP_LOCATION    | Data location for the BigQuery datasets (click on a dataset and go to Details tab)                           |
-| GCP_BUCKET_NAME | your-project-id-flights-lake                                  |
+### How Kestra authenticates to GCP
+
+Kestra uses Google Application Default Credentials through the `GOOGLE_APPLICATION_CREDENTIALS` environment variable.
+
+In `docker-compose.yml`, the local `keys/` folder is mounted into the container as read-only, and the container points Google client libraries to the service account key file inside that mount.
+
+This means Kestra reads the same service account key file from inside the container at:
+
+```text
+/keys/gcp-creds.json
+```
+
+### Kestra configuration
+
+In the `flights` namespace, add these values to **KV Store**:
+
+| Key | Value |
+|---|---|
+| `GCP_PROJECT_ID` | your-project-id |
+| `GCP_LOCATION` | BigQuery dataset location, for example `US` |
+| `GCP_BUCKET_NAME` | your-project-id-flights-lake |
+
+### Run ingestion flows
+
+Run the flows in this order:
+
+1. `01_ingest_lookups.yml`
+2. `02_ingest_flights.yml`
+
+The first flow loads lookup/reference tables. The second loads monthly or yearly flight records into the raw BigQuery dataset.
+
+---
+
+## Phase 4 — dbt local setup
+
+Use a dedicated Python virtual environment for dbt.
+
+### 1. Create and activate the virtual environment
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+```
+
+### 2. Upgrade pip and install dbt
+
+```bash
+python -m pip install --upgrade pip
+python -m pip install dbt-bigquery
+```
+
+### 3. Verify the installation
+
+```bash
+which python
+which pip
+which dbt
+dbt --version
+```
+
+Expected result:
+
+- `python`, `pip`, and `dbt` should resolve from `.venv/bin/`
+- `dbt --version` should show dbt Core and the BigQuery plugin
+
+### 4. Configure the dbt profile
+
+```bash
+cd dbt
+cp profiles.yml.example profiles.yml
+```
+
+Edit `profiles.yml` with your real GCP values.
+
+Example:
+
+```yaml
+flights:
+  target: dev
+  outputs:
+    dev:
+      type: bigquery
+      method: service-account
+      project: your-project-id
+      dataset: flights_dbt
+      threads: 4
+      keyfile: ../keys/gcp-creds.json
+      location: US
+      priority: interactive
+      timeout_seconds: 300
+```
+
+### 5. Install packages and validate the project
+
+```bash
+dbt deps --profiles-dir .
+dbt debug --profiles-dir .
+dbt run --profiles-dir .
+dbt test --profiles-dir .
+```
+
+### 6. Generate documentation
+
+```bash
+dbt docs generate --profiles-dir .
+dbt docs serve --profiles-dir .
+```
+
+### 7. Reactivate dbt in new terminal sessions
+
+Whenever you open a new shell:
+
+```bash
+source .venv/bin/activate
+```
+
+---
+
+## Run order
+
+Use this order for a full local run:
+
+1. Create the GCP project and service account
+2. Apply Terraform
+3. Start Kestra
+4. Add Kestra KV values and secrets
+5. Run the Kestra ingestion flows
+6. Set up the dbt virtual environment
+7. Run `dbt deps`, `dbt debug`, `dbt run`, and `dbt test`
+8. Generate dbt docs
+9. Build the dashboard on top of the mart models
+
+---
+
+## Data model
+
+The dbt project builds models in layers:
+
+- **Staging**: clean raw flight, carrier, and airport data
+- **Intermediate**: enrich flights with joined reference data
+- **Mart**: carrier and route performance models for analytics and dashboards
+
+---
+
+## Cleanup
+
+To avoid GCP charges:
+
+```bash
+cd terraform
+
+terraform destroy \
+  -var="project_id=$PROJECT_ID" \
+  -var="bucket_name=$PROJECT_ID-flights-lake"
+```
+
+Stop local services when finished:
+
+```bash
+docker compose down
+deactivate
+```

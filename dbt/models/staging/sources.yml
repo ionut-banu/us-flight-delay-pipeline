@@ -1,0 +1,36 @@
+version: 2
+
+sources:
+  - name: flights_raw
+    description: Raw lookup tables loaded into BigQuery.
+    database: "{{ target.project }}"
+    schema: flights_raw
+
+    tables:
+      - name: airports
+        identifier: raw_airports
+        description: Raw airport lookup table loaded by Kestra.
+        columns:
+          - name: Code
+            description: Raw airport code.
+            tests:
+              - not_null
+              - unique
+          - name: Description
+            description: Raw airport description.
+            tests:
+              - not_null
+
+      - name: carriers
+        identifier: raw_carriers
+        description: Raw carrier lookup table loaded by Kestra.
+        columns:
+          - name: Code
+            description: Raw carrier code.
+            tests:
+              - not_null
+              - unique
+          - name: Description
+            description: Raw carrier description.
+            tests:
+              - not_null

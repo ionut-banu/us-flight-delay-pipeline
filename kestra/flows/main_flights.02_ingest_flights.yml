@@ -1,0 +1,85 @@
+id: ingest_flights
+namespace: flights
+
+variables:
+  year: "{{ (trigger.date ?? execution.startDate) | date('yyyy') }}"
+  month: "{{ (trigger.date ?? execution.startDate) | date('M') }}"
+  file: "flights_{{ vars.year }}_{{ vars.month }}.csv"
+  zip_file: "On_Time_Reporting_Carrier_On_Time_Performance_1987_present_{{ vars.year }}_{{ vars.month }}.zip"
+  source_url: "https://transtats.bts.gov/PREZIP/On_Time_Reporting_Carrier_On_Time_Performance_1987_present_{{ vars.year }}_{{ vars.month }}.zip"
+  gcs_file: "gs://{{ kv('GCP_BUCKET_NAME') }}/raw/flights/year={{ vars.year }}/month={{ vars.month }}/{{ vars.file }}"
+  table: "flights_raw.raw_flights_{{ vars.year }}_{{ vars.month }}"
+
+tasks:
+  - id: set_label
+    type: io.kestra.plugin.core.execution.Labels
+    labels:
+      file: "{{ render(vars.file) }}"
+      year: "{{ render(vars.year) }}"
+      month: "{{ render(vars.month) }}"
+
+  - id: extract
+    type: io.kestra.plugin.scripts.python.Script
+    containerImage: python:3.11-slim
+    outputFiles:
+      - "*.csv"
+    beforeCommands:
+      - pip install requests
+    script: |
+      import zipfile
+      import requests
+
+      url = "{{ render(vars.source_url) }}"
+      zip_path = "{{ render(vars.zip_file) }}"
+      output_csv = "{{ render(vars.file) }}"
+
+      response = requests.get(url, allow_redirects=True, timeout=300)
+      response.raise_for_status()
+
+      with open(zip_path, "wb") as f:
+          f.write(response.content)
+
+      with zipfile.ZipFile(zip_path, "r") as zf:
+          csv_members = [name for name in zf.namelist() if name.lower().endswith(".csv")]
+          if not csv_members:
+              raise RuntimeError("No CSV file found inside ZIP archive")
+
+          member = csv_members[0]
+          with zf.open(member) as src, open(output_csv, "wb") as dst:
+              dst.write(src.read())
+
+  - id: upload_to_gcs
+    type: io.kestra.plugin.gcp.gcs.Upload
+    from: "{{ outputs.extract.outputFiles[render(vars.file)] }}"
+    to: "{{ render(vars.gcs_file) }}"
+
+  - id: load_flights_bq
+    type: io.kestra.plugin.gcp.bigquery.LoadFromGcs
+    destinationTable: "{{ kv('GCP_PROJECT_ID') }}.{{ render(vars.table) }}"
+    from:
+      - "{{ render(vars.gcs_file) }}"
+    format: CSV
+    autodetect: true
+    csvOptions:
+      skipLeadingRows: 1
+      fieldDelimiter: ","
+      encoding: UTF-8
+      allowQuotedNewLines: true
+    writeDisposition: WRITE_TRUNCATE
+    ignoreUnknownValues: true
+
+  - id: purge_files
+    type: io.kestra.plugin.core.storage.PurgeCurrentExecutionFiles
+    description: Remove downloaded files from Kestra storage
+
+pluginDefaults:
+  - type: io.kestra.plugin.gcp
+    values:
+      projectId: "{{ kv('GCP_PROJECT_ID') }}"
+      location: "{{ kv('GCP_LOCATION') }}"
+
+triggers:
+  - id: monthly_flights_schedule
+    type: io.kestra.plugin.core.trigger.Schedule
+    cron: "0 10 15 * *"
+    timezone: America/New_York
