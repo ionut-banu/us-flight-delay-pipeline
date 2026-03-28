@@ -324,7 +324,7 @@ Use this order for a full local run:
 1. Create the GCP project and service account
 2. Apply Terraform
 3. Start Kestra
-4. Add Kestra KV values and secrets
+4. Add Kestra KV values
 5. Run the Kestra ingestion flows
 6. Set up the dbt virtual environment
 7. Run `dbt deps`, `dbt debug`, `dbt run`, and `dbt test`

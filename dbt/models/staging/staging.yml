@@ -1,0 +1,89 @@
+version: 2
+
+models:
+  - name: stg_flights
+    description: Standardized flight-level staging model built from monthly raw flight tables.
+
+    columns:
+      - name: flight_key
+        tests:
+          - not_null
+
+      - name: flight_date
+        tests:
+          - not_null
+
+      - name: flight_year
+        tests:
+          - not_null
+
+      - name: flight_quarter
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [1, 2, 3, 4]
+              quote: false
+
+      - name: flight_month
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
+              quote: false
+
+      - name: flight_year_month
+        tests:
+          - not_null
+
+      - name: carrier_code
+        tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('stg_carriers')
+                field: carrier_code
+
+      - name: origin_airport_code
+        tests:
+          - not_null
+
+      - name: dest_airport_code
+        tests:
+          - not_null
+
+      - name: origin_airport_id
+        tests:
+          - not_null
+
+      - name: dest_airport_id
+        tests:
+          - not_null
+
+      - name: is_cancelled
+        tests:
+          - accepted_values:
+              arguments:
+                values: [0, 1]
+              quote: false
+
+      - name: is_diverted
+        tests:
+          - accepted_values:
+              arguments:
+                values: [0, 1]
+              quote: false
+
+      - name: is_on_time_arrival
+        tests:
+          - accepted_values:
+              arguments:
+                values: [0, 1]
+              quote: false
+
+      - name: cancellation_reason
+        tests:
+          - accepted_values:
+              arguments:
+                values: ['carrier', 'weather', 'nas', 'security']

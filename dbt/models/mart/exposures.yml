@@ -1,0 +1,17 @@
+version: 2
+
+exposures:
+  - name: flights_performance_dashboard
+    label: Flights Performance Dashboard
+    type: dashboard
+    maturity: medium
+    url: https://lookerstudio.google.com/
+    description: Dashboard for airline and route performance trends based on dbt marts.
+
+    depends_on:
+      - ref('mart_carrier_performance')
+      - ref('mart_route_performance')
+
+    owner:
+      name: Ionut Banu
+      email: ionutbanu094@gmail.com

@@ -1,0 +1,34 @@
+version: 2
+
+models:
+  - name: int_flights_enriched
+    description: Enriched flight model joining staged flights with carrier and airport lookups.
+
+    columns:
+      - name: flight_key
+        tests:
+          - not_null
+
+      - name: flight_date
+        tests:
+          - not_null
+
+      - name: carrier_code
+        tests:
+          - not_null
+
+      - name: route_code
+        tests:
+          - not_null
+
+      - name: origin_airport_code
+        tests:
+          - not_null
+
+      - name: dest_airport_code
+        tests:
+          - not_null
+
+      - name: carrier_name
+        tests:
+          - not_null

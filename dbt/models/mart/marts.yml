@@ -1,0 +1,23 @@
+version: 2
+
+models:
+  - name: mart_carrier_performance
+    columns:
+      - name: month_start
+        tests:
+          - not_null
+      - name: carrier_code
+        tests:
+          - not_null
+      - name: total_flights
+        tests:
+          - not_null
+
+  - name: mart_route_performance
+    columns:
+      - name: route_code
+        tests:
+          - not_null
+      - name: total_flights
+        tests:
+          - not_null
