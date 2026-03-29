@@ -62,8 +62,8 @@ us-flight-delay-pipeline/
         ├── intermediate/
         │   └── int_flights_enriched.sql
         └── mart/
-            ├── mart_carrier_performance.sql
-            └── mart_route_performance.sql
+            ├── mart_carrier_monthly.sql
+            └── mart_routes.sql
 ```
 
 ## Prerequisites

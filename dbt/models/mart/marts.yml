@@ -1,7 +1,7 @@
 version: 2
 
 models:
-  - name: mart_carrier_performance
+  - name: mart_carrier_monthly
     columns:
       - name: month_start
         tests:
@@ -13,7 +13,7 @@ models:
         tests:
           - not_null
 
-  - name: mart_route_performance
+  - name: mart_routes
     columns:
       - name: route_code
         tests:
