@@ -1,6 +1,4 @@
-# us-flight-delay-pipeline
-
-## ✈️ US Flight Delay Analytics Pipeline
+# ✈️ US Flight Delay Analytics Pipeline
 
 End-to-end batch ELT pipeline built with Terraform, Kestra, dbt, and BigQuery on GCP.
 
@@ -106,7 +104,7 @@ Install these locally before starting:
 - Docker and Docker Compose
 - Python 3.11+
 - [uv](https://docs.astral.sh/uv/) — fast Python package and environment manager
-- A GCP project
+- A GCP account with billing enabled
 
 Install `uv` with the standalone installer (no Python required):
 
@@ -120,13 +118,108 @@ powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | ie
 
 ---
 
+## Makefile quick reference
+
+Both the Makefile and full manual commands are provided below. The Makefile offers convenient shortcuts for most tasks; the manual commands are kept as an explicit alternative for transparency or debugging. Use whichever method you prefer.
+
+Run `make` with no arguments to print the full target list.
+
+### How the Makefile loads environment variables
+
+The Makefile uses `-include .env` to load your project variables. Make **parses this file once at startup** — before any recipe runs. This means:
+
+- If `.env` does not exist when you invoke `make`, all variables (`GCP_PROJECT_ID`, etc.) will be empty for that entire run, even if a recipe creates `.env` partway through.
+- You must create and fill in `.env` **before** running any target that uses GCP variables.
+
+The correct order for a fresh clone is always:
+
+```
+make gcp-env        # 1. create .env from the example template
+# edit .env         # 2. fill in your real values
+make check-env      # 3. verify all variables are loaded correctly
+make phase1         # 4. now safe to run — variables are set
+```
+
+### Services and ports
+
+| Service | URL |
+|---|---|
+| Kestra UI | http://localhost:8080 |
+| dbt docs | http://localhost:8081 |
+
+### Bootstrap (mandatory first step)
+
+These two targets must be run **once**, before any phase target:
+
+```bash
+make gcp-env     # copies .env.example → .env
+# open .env and replace `your-project-id` everywhere
+make check-env   # validates all required variables are set
+```
+
+`check-env` is also a dependency of every GCP-touching target, so if you forget to set a variable, you get a clear error message rather than a silent empty string.
+
+### Full setup (one command)
+
+After the bootstrap step above:
+
+```bash
+make setup       # phase1 → phase2 → phase3 → phase4
+```
+
+> **Note:** `setup` pauses at Phase 3 — you must manually add KV Store values in the Kestra UI and run the ingestion flows before Phase 4 produces meaningful results. See the Phase 3 section below.
+
+### Phase-by-phase
+
+```bash
+make phase1      # GCP project + service account + key
+make phase2      # Terraform: GCS bucket + BigQuery datasets
+make phase3      # Start Kestra (then follow manual steps)
+make phase4      # dbt: venv + profile + deps + run + test
+```
+
+### Day-to-day targets
+
+```bash
+make dbt-run              # rebuild all dbt models
+make dbt-test             # run all dbt tests
+make dbt-docs             # generate + serve docs at :8081
+make kestra-logs          # tail Kestra container logs
+make kestra-restart       # restart Kestra (down then up)
+```
+
+### Infrastructure targets
+
+```bash
+make tf-plan              # dry run — preview changes
+make tf-apply             # apply changes
+make tf-destroy           # ⚠️ deletes GCS bucket + BigQuery datasets
+```
+
+### Stopping and cleanup
+
+```bash
+make down        # stop Kestra (keeps GCP resources intact)
+make destroy     # stop Kestra + destroy all Terraform-managed GCP resources
+```
+
+---
+
 ## Phase 1 — GCP project and service account
+
+> **If you are using the Makefile**, complete the bootstrap step first:
+> ```bash
+> make gcp-env   # creates .env
+> # fill in .env
+> make check-env # confirms variables are loaded
+> make phase1    # runs all steps below automatically
+> ```
+> The manual steps below are for reference or if you prefer to run commands individually.
 
 ### 1. Create the GCP project
 
 ```bash
 export GCP_PROJECT_ID="your-project-id"   # must be globally unique
-
 
 gcloud projects create $GCP_PROJECT_ID
 gcloud config set project $GCP_PROJECT_ID
@@ -171,7 +264,7 @@ gcloud iam service-accounts keys create ./keys/gcp-creds.json \
 cp .env.example .env
 ```
 
-Example `.env.example`:
+Fill in `.env` with your real values (replace `your-project-id` with your actual GCP project ID):
 
 ```bash
 GCP_PROJECT_ID=your-project-id
@@ -200,17 +293,16 @@ keys/gcp-creds.json
 
 Provision the GCS bucket and BigQuery datasets.
 
+> **Makefile:** `make phase2`
+
 ```bash
 cd terraform
 
-
 terraform init
-
 
 terraform plan \
   -var="project_id=$GCP_PROJECT_ID" \
   -var="bucket_name=$GCP_PROJECT_ID-flights-lake"
-
 
 terraform apply \
   -var="project_id=$GCP_PROJECT_ID" \
@@ -238,6 +330,8 @@ terraform destroy \
 ## Phase 3 — Kestra
 
 Start Kestra locally:
+
+> **Makefile:** `make phase3`
 
 ```bash
 docker compose up -d
@@ -278,13 +372,15 @@ Run the flows in this order:
 1. `main_flights.01_ingest_lookups.yml`
 2. `main_flights.02_ingest_flights.yml`
 
-The first flow loads lookup/reference tables. The second loads monthly or yearly flight records into the raw BigQuery dataset.
+The first flow loads lookup/reference tables. The second loads monthly or yearly flight records into the raw BigQuery dataset. Use backfill options to ingest historical data or just a few recent months for testing.
 
 ---
 
 ## Phase 4 — dbt local setup
 
 Use `uv` to manage the Python virtual environment and install dbt.
+
+> **Makefile:** `make phase4`
 
 ### 1. Create and activate the virtual environment
 
@@ -316,12 +412,25 @@ Expected result:
 
 ### 4. Configure the dbt profile
 
+You can let the Makefile create and auto-fill `dbt/profiles.yml` from `.env` (recommended):
+
+```bash
+make dbt-profile          # creates dbt/profiles.yml with project set from .env
+# to force overwrite:
+make dbt-profile-force
+```
+
+Note: `make dbt-profile` sources `.env` at recipe runtime, so run `make gcp-env` and fill `.env` before invoking it.
+
+Or do it manually:
+
 ```bash
 cd dbt
 cp profiles.yml.example profiles.yml
+# then edit the 'project:' value in dbt/profiles.yml
 ```
 
-Edit `profiles.yml` with your real GCP values.
+Edit `profiles.yml` with your real GCP values if doing the manual route (replace `your-project-id` with your actual GCP project ID).
 
 Example:
 
@@ -363,12 +472,13 @@ uv run dbt docs serve --profiles-dir . --port 8081
 
 Use this order for a full local run:
 
-1. Create the GCP project and service account
-2. Apply Terraform
-3. Start Kestra
-4. Add Kestra KV values
-5. Run the Kestra ingestion flows
-6. Set up the dbt virtual environment 
+1. Create and fill in `.env` (`make gcp-env`)
+2. Create the GCP project and service account (`make phase1`)
+3. Apply Terraform (`make phase2`)
+4. Start Kestra (`make phase3`)
+5. Add Kestra KV values
+6. Run the Kestra ingestion flows
+7. Set up dbt and run models (`make phase4`)
 
 ## Screenshots
 
