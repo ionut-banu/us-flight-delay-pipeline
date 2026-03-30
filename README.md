@@ -6,6 +6,8 @@ End-to-end batch ELT pipeline built with Terraform, Kestra, dbt, and BigQuery on
 
 Built as the capstone project for the [DataTalks.Club Data Engineering Zoomcamp](https://github.com/DataTalksClub/data-engineering-zoomcamp).
 
+Looker Studio Dashboard: [Looker Studio Flight Delay Dashboard](https://lookerstudio.google.com/s/nM7VK6DLLXI)
+
 ---
 
 ## Problem Description
@@ -355,14 +357,6 @@ uv run dbt docs generate --profiles-dir .
 uv run dbt docs serve --profiles-dir . --port 8081
 ```
 
-### 7. Reactivate dbt in new terminal sessions
-
-Whenever you open a new shell:
-
-```bash
-source .venv/bin/activate
-```
-
 ---
 
 ## Run order
@@ -375,3 +369,29 @@ Use this order for a full local run:
 4. Add Kestra KV values
 5. Run the Kestra ingestion flows
 6. Set up the dbt virtual environment 
+
+## Screenshots
+
+### GCP Console Views
+
+#### Cloud Storage
+
+![GCP Cloud Storage bucket with ingested flight data](screenshots/1_gcp_cloud_storage.png)
+
+#### BigQuery
+
+![GCP BigQuery console showing raw flights table and dbt models](screenshots/2_gcp_big_query.png)
+
+### Looker Studio Dashboard Views
+
+#### Dashboard - Carrier Overview
+
+![Dashboard Carrier Overview showing delay trends by airline](screenshots/3_dashboard_carrier_overview.png)
+
+#### Dashboard - Route Overview 1
+
+![Dashboard Route Overview showing delay trends by route 1](screenshots/4_dashboard_route_overview_1.png)
+
+#### Dashboard - Route Overview 2
+
+![Dashboard Route Overview showing delay trends by route 2](screenshots/5_dashboard_route_overview_2.png)
