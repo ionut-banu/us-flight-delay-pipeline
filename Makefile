@@ -29,32 +29,32 @@ help:
 	@echo "    make check-env         Verify all required environment variables are set"
 	@echo ""
 	@echo "  Top-level"
-	@echo "    make setup             Run all phases end-to-end (1 → 2 → 3 → 4)"
+	@echo "    make setup             Run all phases end-to-end (gcp → tf → kestra)"
 	@echo "    make down              Stop all running services"
 	@echo "    make destroy           Stop services + destroy all GCP infrastructure"
 	@echo ""
-	@echo "  Phase 1 — GCP bootstrap"
+	@echo "  GCP"
 	@echo "    make gcp-project       Create the GCP project and set it as active"
 	@echo "    make gcp-apis          Enable BigQuery, GCS, and IAM APIs"
 	@echo "    make gcp-sa            Create the service account and download the key"
-	@echo "    make phase1            Run all Phase 1 steps in order"
+	@echo "    make gcp            	  Run all gcp steps in order"
 	@echo ""
-	@echo "  Phase 2 — Terraform"
+	@echo "  Terraform"
 	@echo "    make tf-init           Initialise the Terraform working directory"
 	@echo "    make tf-plan           Preview infrastructure changes (dry run)"
 	@echo "    make tf-apply          Provision GCS bucket + BigQuery datasets"
 	@echo "    make tf-destroy        Tear down all Terraform-managed resources"
-	@echo "    make phase2            tf-init + tf-apply"
+	@echo "    make tf                tf-init + tf-apply"
 	@echo ""
-	@echo "  Phase 3 — Kestra"
+	@echo "  Kestra"
 	@echo "    make kestra-up         Start Kestra in the background (docker compose up -d)"
 	@echo "    make kestra-down       Stop Kestra"
 	@echo "    make kestra-logs       Tail Kestra container logs"
 	@echo "    make kestra-restart    Restart Kestra (down then up)"
 	@echo "    make kestra-status     Show running container status"
-	@echo "    make phase3            Start Kestra + print KV Store setup instructions"
+	@echo "    make kestra            Start Kestra + print KV Store setup instructions"
 	@echo ""
-	@echo "  Phase 4 — dbt"
+	@echo "  Transform — dbt"
 	@echo "    make dbt-venv          Create .venv with uv and install dbt-bigquery"
 	@echo "    make dbt-profile       Copy profiles.yml.example → profiles.yml (skips if exists)"
 	@echo "    make dbt-deps          Install dbt packages (dbt deps)"
@@ -64,7 +64,7 @@ help:
 	@echo "    make dbt-docs-generate Generate dbt documentation"
 	@echo "    make dbt-docs-serve    Serve dbt docs at http://localhost:8081"
 	@echo "    make dbt-docs          Generate then serve docs"
-	@echo "    make phase4            Full dbt setup: venv → profile → deps → debug → run → test"
+	@echo "    make transform         Full dbt setup: venv → profile → deps → debug → run → test"
 	@echo ""
 
 
@@ -93,7 +93,7 @@ check-env:
 
 
 # ─────────────────────────────────────────────
-# Phase 1 targets
+# GCP targets
 # ─────────────────────────────────────────────
 
 
@@ -137,17 +137,17 @@ gcp-sa: check-env
 	fi
 
 
-.PHONY: phase1
-phase1: check-env gcp-project gcp-apis gcp-sa
+.PHONY: gcp
+gcp: check-env gcp-project gcp-apis gcp-sa
 	@echo ""
-	@echo "✓ Phase 1 complete."
+	@echo "✓ GCP setup complete."
 	@echo "  Key written to ./keys/gcp-creds.json"
-	@echo "  Run: make phase2"
+	@echo "  Run: make tf"
 	@echo ""
 
 
 # ─────────────────────────────────────────────
-# Phase 2 — Terraform
+# Terraform
 # ─────────────────────────────────────────────
 
 
@@ -180,17 +180,17 @@ tf-destroy: check-env
 	cd $(TF_DIR) && terraform destroy $(TF_VARS) -auto-approve
 
 
-.PHONY: phase2
-phase2: tf-init tf-apply
+.PHONY: tf
+tf: tf-init tf-apply
 	@echo ""
-	@echo "✓ Phase 2 complete."
+	@echo "✓ Terraform setup complete."
 	@echo "  GCS bucket and BigQuery datasets provisioned."
-	@echo "  Run: make phase3"
+	@echo "  Run: make kestra"
 	@echo ""
 
 
 # ─────────────────────────────────────────────
-# Phase 3 — Kestra
+# Kestra
 # ─────────────────────────────────────────────
 
 
@@ -224,11 +224,10 @@ kestra-status:
 	cd $(KESTRA_DIR) && docker compose ps
 
 
-.PHONY: phase3
-phase3: kestra-up
+.PHONY: kestra
+kestra: kestra-up
 	@echo ""
-	@echo "✓ Phase 3 complete."
-	@echo "  Kestra is running at http://localhost:8080"
+	@echo "✓ Kestra is running at http://localhost:8080"
 	@echo ""
 	@echo "  Next steps (manual):"
 	@echo "  1. Open http://localhost:8080"
@@ -240,12 +239,12 @@ phase3: kestra-up
 	@echo "       main_flights.01_ingest_lookups"
 	@echo "       main_flights.02_ingest_flights (use backfill option to ingest historical data)"
 	@echo ""
-	@echo "  Then run: make phase4"
+	@echo "  Then run: make transform"
 	@echo ""
 
 
 # ─────────────────────────────────────────────
-# Phase 4 — dbt
+# Transform — dbt
 # ─────────────────────────────────────────────
 
 
@@ -258,7 +257,7 @@ DBT_DIR := dbt
 .PHONY: dbt-venv
 dbt-venv:
 	@echo "→ Creating virtual environment with uv"
-	$(UV) venv $(VENV) --python 3.11
+	$(UV) venv $(VENV) --python 3.11 --clear
 	@echo "→ Installing dbt-bigquery"
 	$(UV) pip install dbt-bigquery --python $(VENV)/bin/python
 	@echo "  dbt installed at $(DBT)"
@@ -290,47 +289,47 @@ dbt-profile-force:
 .PHONY: dbt-deps
 dbt-deps:
 	@echo "→ Installing dbt packages"
-	cd $(DBT_DIR) && $(DBT) deps --profiles-dir .
+	cd $(DBT_DIR) && uv run dbt deps --profiles-dir .
 
 
 .PHONY: dbt-debug
 dbt-debug:
 	@echo "→ Validating dbt connection to BigQuery"
-	cd $(DBT_DIR) && $(DBT) debug --profiles-dir .
+	cd $(DBT_DIR) && uv run dbt debug --profiles-dir .
 
 
 .PHONY: dbt-run
 dbt-run:
 	@echo "→ Running dbt models"
-	cd $(DBT_DIR) && $(DBT) run --profiles-dir .
+	cd $(DBT_DIR) && uv run dbt run --profiles-dir .
 
 
 .PHONY: dbt-test
 dbt-test:
 	@echo "→ Running dbt tests"
-	cd $(DBT_DIR) && $(DBT) test --profiles-dir .
+	cd $(DBT_DIR) && uv run dbt test --profiles-dir .
 
 
 .PHONY: dbt-docs-generate
 dbt-docs-generate:
 	@echo "→ Generating dbt docs"
-	cd $(DBT_DIR) && $(DBT) docs generate --profiles-dir .
+	cd $(DBT_DIR) && uv run dbt docs generate --profiles-dir .
 
 
 .PHONY: dbt-docs-serve
 dbt-docs-serve:
 	@echo "→ Serving dbt docs at http://localhost:8081"
-	cd $(DBT_DIR) && $(DBT) docs serve --profiles-dir . --port 8081
+	cd $(DBT_DIR) && uv run dbt docs serve --profiles-dir . --port 8081
 
 
 .PHONY: dbt-docs
 dbt-docs: dbt-docs-generate dbt-docs-serve
 
 
-.PHONY: phase4
-phase4: dbt-venv dbt-profile dbt-deps dbt-debug dbt-run dbt-test
+.PHONY: transform
+transform: dbt-venv dbt-profile dbt-deps dbt-debug dbt-run dbt-test
 	@echo ""
-	@echo "✓ Phase 4 complete."
+	@echo "✓ Transform complete."
 	@echo "  All dbt models built and tested."
 	@echo "  Run: make dbt-docs to generate and serve documentation"
 	@echo ""
@@ -342,7 +341,7 @@ phase4: dbt-venv dbt-profile dbt-deps dbt-debug dbt-run dbt-test
 
 
 .PHONY: setup
-setup: phase1 phase2 phase3 phase4
+setup: gcp tf kestra
 	@echo ""
 	@echo "✓ Full pipeline setup complete."
 	@echo ""

@@ -137,7 +137,7 @@ The correct order for a fresh clone is always:
 make gcp-env        # 1. create .env from the example template
 # edit .env         # 2. fill in your real values
 make check-env      # 3. verify all variables are loaded correctly
-make phase1         # 4. now safe to run — variables are set
+make gcp            # 4. now safe to run — variables are set
 ```
 
 ### Services and ports
@@ -153,7 +153,7 @@ These two targets must be run **once**, before any phase target:
 
 ```bash
 make gcp-env     # copies .env.example → .env
-# open .env and replace `your-project-id` everywhere
+# open .env replace `your-project-id` everywhere and replace <absolute-path-to-project> with the real absolute path on your machine
 make check-env   # validates all required variables are set
 ```
 
@@ -164,18 +164,18 @@ make check-env   # validates all required variables are set
 After the bootstrap step above:
 
 ```bash
-make setup       # phase1 → phase2 → phase3 → phase4
+make setup       # gcp → tf → kestra
 ```
 
-> **Note:** `setup` pauses at Phase 3 — you must manually add KV Store values in the Kestra UI and run the ingestion flows before Phase 4 produces meaningful results. See the Phase 3 section below.
+> **Note:** `setup` pauses at `kestra` — you must manually add KV Store values in the Kestra UI and run the ingestion flows before `make transform` produces meaningful results. See the Kestra section below.
 
-### Phase-by-phase
+### Target-by-target (manual run)
 
 ```bash
-make phase1      # GCP project + service account + key
-make phase2      # Terraform: GCS bucket + BigQuery datasets
-make phase3      # Start Kestra (then follow manual steps)
-make phase4      # dbt: venv + profile + deps + run + test
+make gcp           # GCP project + service account + key
+make tf            # Terraform: GCS bucket + BigQuery datasets
+make kestra        # Start Kestra (then follow manual steps)
+make transform     # dbt: venv + profile + deps + run + test
 ```
 
 ### Day-to-day targets
@@ -205,14 +205,14 @@ make destroy     # stop Kestra + destroy all Terraform-managed GCP resources
 
 ---
 
-## Phase 1 — GCP project and service account
+## GCP project and service account
 
 > **If you are using the Makefile**, complete the bootstrap step first:
 > ```bash
 > make gcp-env   # creates .env
 > # fill in .env
 > make check-env # confirms variables are loaded
-> make phase1    # runs all steps below automatically
+> make gcp       # runs all steps below automatically
 > ```
 > The manual steps below are for reference or if you prefer to run commands individually.
 
@@ -264,7 +264,7 @@ gcloud iam service-accounts keys create ./keys/gcp-creds.json \
 cp .env.example .env
 ```
 
-Fill in `.env` with your real values (replace `your-project-id` with your actual GCP project ID):
+Fill in `.env` with your real values (replace `your-project-id` with your actual GCP project ID and replace `<absolute-path-to-project>` with the real absolute path on your machine):
 
 ```bash
 GCP_PROJECT_ID=your-project-id
@@ -289,11 +289,11 @@ keys/gcp-creds.json
 
 ---
 
-## Phase 2 — Terraform
+## Terraform
 
 Provision the GCS bucket and BigQuery datasets.
 
-> **Makefile:** `make phase2`
+> **Makefile:** `make tf`
 
 ```bash
 cd terraform
@@ -327,11 +327,11 @@ terraform destroy \
 
 ---
 
-## Phase 3 — Kestra
+## Kestra
 
 Start Kestra locally:
 
-> **Makefile:** `make phase3`
+> **Makefile:** `make kestra`
 
 ```bash
 docker compose up -d
@@ -376,11 +376,11 @@ The first flow loads lookup/reference tables. The second loads monthly or yearly
 
 ---
 
-## Phase 4 — dbt local setup
+## dbt transformations
 
 Use `uv` to manage the Python virtual environment and install dbt.
 
-> **Makefile:** `make phase4`
+> **Makefile:** `make transform`
 
 ### 1. Create and activate the virtual environment
 
@@ -473,12 +473,12 @@ uv run dbt docs serve --profiles-dir . --port 8081
 Use this order for a full local run:
 
 1. Create and fill in `.env` (`make gcp-env`)
-2. Create the GCP project and service account (`make phase1`)
-3. Apply Terraform (`make phase2`)
-4. Start Kestra (`make phase3`)
+2. Create the GCP project and service account (`make gcp`)
+3. Apply Terraform (`make tf`)
+4. Start Kestra (`make kestra`)
 5. Add Kestra KV values
 6. Run the Kestra ingestion flows
-7. Set up dbt and run models (`make phase4`)
+7. Set up dbt and run models (`make transform`)
 
 ## Screenshots
 
