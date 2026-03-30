@@ -2,6 +2,11 @@ version: 2
 
 models:
   - name: mart_carrier_monthly
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns:
+            - carrier_code
+            - month_start
     columns:
       - name: month_start
         tests:

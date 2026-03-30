@@ -4,15 +4,40 @@
 
 End-to-end batch ELT pipeline built with Terraform, Kestra, dbt, and BigQuery on GCP.
 
-This project ingests BTS US on-time performance data for 2022–2024, loads it into BigQuery, transforms it with dbt, and produces analytics-ready models for airline delay trends, cancellation patterns, and route performance.
-
 Built as the capstone project for the [DataTalks.Club Data Engineering Zoomcamp](https://github.com/DataTalksClub/data-engineering-zoomcamp).
 
-## Questions answered
+---
 
-- Which airlines have the worst on-time performance, and why?
+## Problem Description
+
+Flight delays cost the US economy an estimated **$33 billion per year** — affecting passengers, airlines, and airports alike. The Bureau of Transportation Statistics (BTS) publishes detailed on-time performance records for every domestic US flight, but the raw data is split across hundreds of monthly CSV files, lacks any join to carrier or airport reference data, and contains no pre-built aggregations. This makes it nearly impossible to answer even basic operational questions without significant data engineering work.
+
+**The core problem:** there is no analytics-ready layer on top of this public dataset. Analysts cannot easily answer:
+
+- Which airlines consistently underperform, and is their delay driven by carrier operations, late aircraft, or NAS congestion?
+- Are delays getting better or worse over time across the industry?
+- Which specific routes and airports are the worst offenders for delays and cancellations?
+
+This project solves that by building a fully automated, end-to-end batch ELT pipeline that:
+
+1. **Ingests** raw BTS monthly flight records and lookup tables (carriers, airports) into Google Cloud Storage
+2. **Loads** them into BigQuery as a raw data lake layer
+3. **Transforms** them with dbt into clean staging models, an enriched intermediate layer (flights joined with carrier and airport names), and two analytics mart tables optimized for dashboarding
+4. **Produces** a dashboard that surfaces delay trends by carrier, route, and time period
+
+The result is a reproducible, cloud-native pipeline that turns 30+ years of raw government flight data into actionable insights — provisioned entirely through code with Terraform and orchestrated automatically with Kestra.
+
+**Data source:** [BTS On-Time Performance](https://transtats.bts.gov/DL_SelectFields.aspx?gnoyr_VQ=FGJ&QO_fu146_anzr=b0-gvzr)
+
+---
+
+## Questions Answered
+
+- Which airlines have the worst on-time performance, and why (carrier delay vs. NAS vs. weather)?
 - Is flight delay getting better or worse over time?
 - Which routes, airports, and carriers contribute most to delays and cancellations?
+
+---
 
 ## Stack
 
@@ -32,7 +57,6 @@ us-flight-delay-pipeline/
 ├── .env.example
 ├── README.md
 ├── Makefile
-├── docker-compose.yml
 │
 ├── keys/                          ← GITIGNORED — never committed
 │   └── gcp-creds.json             ← local GCP service account key
@@ -43,27 +67,32 @@ us-flight-delay-pipeline/
 │   └── outputs.tf
 │
 ├── kestra/
-│   └── flows/
-│       ├── 01_ingest_lookups.yml
-│       └── 02_ingest_flights.yml
+|   ├──docker-compose.yml
+│   └──flows/
+│       ├── main_flights.01_ingest_lookups.yml
+│       └── main_flights.02_ingest_flights.yml
 │
 └── dbt/
     ├── dbt_project.yml
     ├── profiles.yml               ← GITIGNORED — never committed
     ├── profiles.yml.example       ← committed template
     ├── packages.yml
-    ├── schema.yml
     └── models/
         ├── staging/
+        │   ├── staging.yml
+        |   ├── lookups.yml
         │   ├── sources.yml
         │   ├── stg_flights.sql
         │   ├── stg_airports.sql
         │   └── stg_carriers.sql
         ├── intermediate/
-        │   └── int_flights_enriched.sql
+        │   ├── intermediate.yml
+        |   └── int_flights_enriched.sql
         └── mart/
+            ├── mart.yml
             ├── mart_carrier_monthly.sql
-            └── mart_routes.sql
+            ├── mart_routes.sql
+            └── exposures.yml
 ```
 
 ## Prerequisites
@@ -74,7 +103,18 @@ Install these locally before starting:
 - Terraform
 - Docker and Docker Compose
 - Python 3.11+
+- [uv](https://docs.astral.sh/uv/) — fast Python package and environment manager
 - A GCP project
+
+Install `uv` with the standalone installer (no Python required):
+
+```bash
+# macOS / Linux
+curl -LsSf https://astral.sh/uv/install.sh | sh
+
+# Windows (PowerShell)
+powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
+```
 
 ---
 
@@ -83,10 +123,11 @@ Install these locally before starting:
 ### 1. Create the GCP project
 
 ```bash
-export PROJECT_ID="your-project-id"   # must be globally unique
+export GCP_PROJECT_ID="your-project-id"   # must be globally unique
 
-gcloud projects create $PROJECT_ID
-gcloud config set project $PROJECT_ID
+
+gcloud projects create $GCP_PROJECT_ID
+gcloud config set project $GCP_PROJECT_ID
 ```
 
 ### 2. Enable required APIs
@@ -104,18 +145,22 @@ gcloud services enable \
 gcloud iam service-accounts create us-flight-delay-pipeline-sa \
   --display-name="US Flight Delay Pipeline Service Account"
 
-gcloud projects add-iam-policy-binding $PROJECT_ID \
-  --member="serviceAccount:us-flight-delay-pipeline-sa@$PROJECT_ID.iam.gserviceaccount.com" \
+
+gcloud projects add-iam-policy-binding $GCP_PROJECT_ID \
+  --member="serviceAccount:us-flight-delay-pipeline-sa@$GCP_PROJECT_ID.iam.gserviceaccount.com" \
   --role="roles/bigquery.admin"
 
-gcloud projects add-iam-policy-binding $PROJECT_ID \
-  --member="serviceAccount:us-flight-delay-pipeline-sa@$PROJECT_ID.iam.gserviceaccount.com" \
+
+gcloud projects add-iam-policy-binding $GCP_PROJECT_ID \
+  --member="serviceAccount:us-flight-delay-pipeline-sa@$GCP_PROJECT_ID.iam.gserviceaccount.com" \
   --role="roles/storage.admin"
+
 
 mkdir -p keys
 
+
 gcloud iam service-accounts keys create ./keys/gcp-creds.json \
-  --iam-account=us-flight-delay-pipeline-sa@$PROJECT_ID.iam.gserviceaccount.com
+  --iam-account=us-flight-delay-pipeline-sa@$GCP_PROJECT_ID.iam.gserviceaccount.com
 ```
 
 ### 4. Create the local environment file
@@ -156,15 +201,18 @@ Provision the GCS bucket and BigQuery datasets.
 ```bash
 cd terraform
 
+
 terraform init
 
+
 terraform plan \
-  -var="project_id=$PROJECT_ID" \
-  -var="bucket_name=$PROJECT_ID-flights-lake"
+  -var="project_id=$GCP_PROJECT_ID" \
+  -var="bucket_name=$GCP_PROJECT_ID-flights-lake"
+
 
 terraform apply \
-  -var="project_id=$PROJECT_ID" \
-  -var="bucket_name=$PROJECT_ID-flights-lake"
+  -var="project_id=$GCP_PROJECT_ID" \
+  -var="bucket_name=$GCP_PROJECT_ID-flights-lake"
 ```
 
 Expected outputs:
@@ -179,8 +227,8 @@ To tear everything down later:
 
 ```bash
 terraform destroy \
-  -var="project_id=$PROJECT_ID" \
-  -var="bucket_name=$PROJECT_ID-flights-lake"
+  -var="project_id=$GCP_PROJECT_ID" \
+  -var="bucket_name=$GCP_PROJECT_ID-flights-lake"
 ```
 
 ---
@@ -225,8 +273,8 @@ In the `flights` namespace, add these values to **KV Store**:
 
 Run the flows in this order:
 
-1. `01_ingest_lookups.yml`
-2. `02_ingest_flights.yml`
+1. `main_flights.01_ingest_lookups.yml`
+2. `main_flights.02_ingest_flights.yml`
 
 The first flow loads lookup/reference tables. The second loads monthly or yearly flight records into the raw BigQuery dataset.
 
@@ -234,34 +282,34 @@ The first flow loads lookup/reference tables. The second loads monthly or yearly
 
 ## Phase 4 — dbt local setup
 
-Use a dedicated Python virtual environment for dbt.
+Use `uv` to manage the Python virtual environment and install dbt.
 
 ### 1. Create and activate the virtual environment
 
 ```bash
-python3 -m venv .venv
+uv venv .venv --python 3.11
 source .venv/bin/activate
 ```
 
-### 2. Upgrade pip and install dbt
+### 2. Install dbt
 
 ```bash
-python -m pip install --upgrade pip
-python -m pip install dbt-bigquery
+uv pip install dbt-bigquery
 ```
+
+> No separate pip upgrade step is needed — `uv` ships its own dependency resolver and does not rely on pip's version.
 
 ### 3. Verify the installation
 
 ```bash
 which python
-which pip
 which dbt
 dbt --version
 ```
 
 Expected result:
 
-- `python`, `pip`, and `dbt` should resolve from `.venv/bin/`
+- `python` and `dbt` should resolve from `.venv/bin/`
 - `dbt --version` should show dbt Core and the BigQuery plugin
 
 ### 4. Configure the dbt profile
@@ -294,17 +342,17 @@ flights:
 ### 5. Install packages and validate the project
 
 ```bash
-dbt deps --profiles-dir .
-dbt debug --profiles-dir .
-dbt run --profiles-dir .
-dbt test --profiles-dir .
+uv run dbt deps --profiles-dir .
+uv run dbt debug --profiles-dir .
+uv run dbt run --profiles-dir .
+uv run dbt test --profiles-dir .
 ```
 
 ### 6. Generate documentation
 
 ```bash
-dbt docs generate --profiles-dir .
-dbt docs serve --profiles-dir .
+uv run dbt docs generate --profiles-dir .
+uv run dbt docs serve --profiles-dir . --port 8081
 ```
 
 ### 7. Reactivate dbt in new terminal sessions
@@ -326,38 +374,4 @@ Use this order for a full local run:
 3. Start Kestra
 4. Add Kestra KV values
 5. Run the Kestra ingestion flows
-6. Set up the dbt virtual environment
-7. Run `dbt deps`, `dbt debug`, `dbt run`, and `dbt test`
-8. Generate dbt docs
-9. Build the dashboard on top of the mart models
-
----
-
-## Data model
-
-The dbt project builds models in layers:
-
-- **Staging**: clean raw flight, carrier, and airport data
-- **Intermediate**: enrich flights with joined reference data
-- **Mart**: carrier and route performance models for analytics and dashboards
-
----
-
-## Cleanup
-
-To avoid GCP charges:
-
-```bash
-cd terraform
-
-terraform destroy \
-  -var="project_id=$PROJECT_ID" \
-  -var="bucket_name=$PROJECT_ID-flights-lake"
-```
-
-Stop local services when finished:
-
-```bash
-docker compose down
-deactivate
-```
+6. Set up the dbt virtual environment 

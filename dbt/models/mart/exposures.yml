@@ -5,7 +5,7 @@ exposures:
     label: US Flight Delays Dashboard
     type: dashboard
     maturity: medium
-    url: https://lookerstudio.google.com/reporting/YOUR_REPORT_ID
+    url: https://lookerstudio.google.com/s/nM7VK6DLLXI
     description: Dashboard showing monthly carrier delay trends and route-level delay, cancellation, and diversion performance.
 
     depends_on:
