@@ -82,4 +82,3 @@ triggers:
   - id: monthly_flights_schedule
     type: io.kestra.plugin.core.trigger.Schedule
     cron: "0 10 15 * *"
-    timezone: America/New_York
